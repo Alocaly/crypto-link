@@ -11,7 +11,7 @@ from backOffice.statsManager import StatsManager
 from backOffice.userWalletManager import UserWalletManager
 from backOffice.guildServicesManager import GuildProfileManager
 from backOffice.profileRegistrations import AccountManager
-from backOffice.botWallet import BotManager
+from backOffice.botManager import BotManager
 from backOffice.corpHistory import CorporateHistoryManager
 
 
