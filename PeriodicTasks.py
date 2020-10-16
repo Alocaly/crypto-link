@@ -1,8 +1,10 @@
 import time
 from datetime import datetime
 import tweepy
+from re import search
 
 import discord
+from discord import Embed, Color
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from colorama import Fore, init
@@ -37,6 +39,10 @@ class PeriodicTasks:
         self.auth.set_access_token(key=self.twitter_acc['accessToken'], secret=self.twitter_acc['accessSecret'])
         self.tweeter = tweepy.API(self.auth)
 
+    @staticmethod
+    def special_character_check(memo):
+        return search("[~!#$%^&*()_+{}:;\']", memo)
+
     async def global_bot_stats_update(self, tx):
         bot_stats = {
             "depositCount": 1,
@@ -48,7 +54,6 @@ class PeriodicTasks:
     def filter_transaction(self, new_transactions: list):
         # Building list of deposits if memo included
         stellar_manager = self.backoffice.stellar_manager
-
         tx_with_memo = [tx for tx in new_transactions if 'memo' in tx.keys()]  # GET Transactions who have memo
         tx_with_no_memo = [tx for tx in new_transactions if tx not in tx_with_memo]  # GET transactions without memo
         tx_with_registered_memo = [tx for tx in tx_with_memo if stellar_manager.check_if_stellar_memo_exists(
@@ -81,42 +86,48 @@ class PeriodicTasks:
             if not stellar_manager.check_if_deposit_hash_processed_succ_deposits(tx['hash']):
                 if stellar_manager.stellar_deposit_history(deposit_type=1, tx_data=tx):
                     # Update balance based on incoming asset
-                    if wallet_manager.update_coin_balance_by_memo(memo=tx['memo'], coin=tx['asset_type']["code"],
-                                                                  amount=int(tx['asset_type']["amount"])):
-                        # If balance updated successfully send the message to user of processed deposit
-                        user_id = wallet_manager.get_discord_id_from_memo(memo=tx['memo'])  # Return usr int number
-                        dest = await bot.fetch_user(user_id=int(user_id))
+                    if not self.special_character_check(memo=tx["memo"]):
+                        if wallet_manager.update_coin_balance_by_memo(memo=tx['memo'], coin=tx['asset_type']["code"],
+                                                                      amount=int(tx['asset_type']["amount"])):
+                            # If balance updated successfully send the message to user of processed deposit
+                            user_id = wallet_manager.get_discord_id_from_memo(memo=tx['memo'])  # Return usr int number
+                            dest = await bot.fetch_user(user_id=int(user_id))
 
-                        await custom_messages.deposit_notification_message(recipient=dest, tx_details=tx)
+                            await custom_messages.deposit_notification_message(recipient=dest, tx_details=tx)
 
-                        # Channel system message on deposit
-                        await custom_messages.sys_deposit_notifications(channel=msg_channel,
-                                                                        user=dest, tx_details=tx)
+                            # Channel system message on deposit
+                            await custom_messages.sys_deposit_notifications(channel=msg_channel,
+                                                                            user=dest, tx_details=tx)
 
-                        # Explorer messages
-                        load_channels = [bot.get_channel(id=int(chn)) for chn in
-                                         guild_profiles.get_all_explorer_applied_channels()]
+                            # Explorer messages
+                            load_channels = [bot.get_channel(id=int(chn)) for chn in
+                                             guild_profiles.get_all_explorer_applied_channels()]
 
-                        explorer_msg = f':inbox_tray: Someone deposited {round(tx["asset_type"]["amount"] / 10000000, 7)} ' \
-                                       f'{tx["asset_type"]["code"].upper()} to {bot.user}'
+                            explorer_msg = f':inbox_tray: Someone deposited {round(tx["asset_type"]["amount"] / 10000000, 7)} ' \
+                                           f'{tx["asset_type"]["code"].upper()} to {bot.user}'
 
-                        await custom_messages.explorer_messages(applied_channels=load_channels,
-                                                                message=explorer_msg,
-                                                                on_chain=True, tx_type='deposit')
+                            await custom_messages.explorer_messages(applied_channels=load_channels,
+                                                                    message=explorer_msg,
+                                                                    on_chain=True, tx_type='deposit')
 
-                        on_chain_stats = {
-                            f"{tx['asset_type']['code'].lower()}.depositsCount": 1,
-                            f"{tx['asset_type']['code'].lower()}.totalDeposited": round(
-                                int(tx['asset_type']["amount"]) / 10000000,
-                                7)}
+                            on_chain_stats = {
+                                f"{tx['asset_type']['code'].lower()}.depositsCount": 1,
+                                f"{tx['asset_type']['code'].lower()}.totalDeposited": round(
+                                    int(tx['asset_type']["amount"]) / 10000000,
+                                    7)}
 
-                        await stats_manager.update_user_on_chain_stats(user_id=dest.id, stats_data=on_chain_stats)
+                            await stats_manager.update_user_on_chain_stats(user_id=dest.id, stats_data=on_chain_stats)
 
-                        await self.global_bot_stats_update(tx=tx)
+                            await self.global_bot_stats_update(tx=tx)
 
+                        else:
+                            print(Fore.RED + f'TX Processing error: \n'
+                                             f'{tx}')
                     else:
-                        print(Fore.RED + f'TX Processing error: \n'
+                        print(Fore.RED + f'Special characters in Memo write to file: \n'
                                          f'{tx}')
+                        await custom_messages.send_special_char_notification(channel=msg_channel, tx=tx)
+
                 else:
                     print(Fore.RED + 'Could not store to history')
             else:
@@ -126,12 +137,17 @@ class PeriodicTasks:
         stellar_manager = self.backoffice.stellar_manager
         for tx in no_registered_memo:
             if not stellar_manager.check_if_deposit_hash_processed_unprocessed_deposits(tx_hash=tx['hash']):
-                if stellar_manager.stellar_deposit_history(deposit_type=2, tx_data=tx):
-                    await custom_messages.send_unidentified_deposit_msg(channel=channel, tx_details=tx)
-                    await self.global_bot_stats_update(tx=tx)
+                if not self.special_character_check(memo=tx["memo"]):
+                    if stellar_manager.stellar_deposit_history(deposit_type=2, tx_data=tx):
+                        await custom_messages.send_unidentified_deposit_msg(channel=channel, tx_details=tx)
+                        await self.global_bot_stats_update(tx=tx)
+                    else:
+                        print(Fore.RED + f'There has been an issue while processing tx with no memo \n'
+                                         f'HASH{tx["hash"]}')
                 else:
-                    print(Fore.RED + f'There has been an issue while processing tx with no memo \n'
-                                     f'HASH{tx["hash"]}')
+                    print(Fore.RED + f'Special characters in Memo write to file: \n'
+                                     f'{tx}')
+                    await custom_messages.send_special_char_notification(channel=channel, tx=tx)
             else:
                 print(Fore.YELLOW + 'Unknown processed already')
 
@@ -146,9 +162,9 @@ class PeriodicTasks:
         channel_id = self.notification_channels["stellar"]  # Sys channel where details are sent
         if new_transactions:
             # Filter transactions
+
             tx_with_registered_memo, tx_with_not_registered_memo, tx_with_no_memo = self.filter_transaction(
                 new_transactions)
-
             channel = bot.get_channel(id=int(channel_id))
             if tx_with_registered_memo:
                 await self.process_tx_with_memo(msg_channel=channel, memo_transactions=tx_with_registered_memo)

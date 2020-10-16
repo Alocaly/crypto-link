@@ -89,7 +89,7 @@ class CustomMessages:
         await channel.send(embed=notify)
 
     @staticmethod
-    async def embed_builder(ctx, title, description, data: list, destination=None, thumbnail=None):
+    async def embed_builder(ctx, title, description, data: list, destination=None, thumbnail=None, c: Colour = None):
         """
         Build embed from data provided
         :param ctx: Discord Context
@@ -100,9 +100,13 @@ class CustomMessages:
         :param thumbnail: where embed is sent
         :return:
         """
+
+        if not c:
+            c = discord.Colour.gold()
+
         embed = discord.Embed(title=title,
                               description=description,
-                              colour=discord.Colour.gold())
+                              colour=c)
         for d in data:
             embed.add_field(name=d['name'],
                             value=d['value'],
@@ -115,23 +119,27 @@ class CustomMessages:
             await ctx.channel.send(embed=embed, delete_after=40)
 
     @staticmethod
-    async def system_message(ctx, color_code: int, message: str, destination: int, sys_msg_title: str = None):
+    async def system_message(ctx, message: str, color_code, destination: int, sys_msg_title: str = None):
         """
         Custom System Messages
         """
-        if color_code == 0:
-            signal = 0x319f6b
-            emoji = ":robot: "
+        if isinstance(color_code,Colour):
+            emoji = "robot"
+            c = color_code
         else:
-            signal = discord.Colour.red()
-            emoji = ":warning:"
+            if color_code == 0:
+                c = 0x319f6b
+                emoji = ":robot: "
+            else:
+                c = discord.Colour.red()
+                emoji = ":warning:"
 
         if sys_msg_title is None:
             sys_msg_title = 'System Message'
 
         sys_embed = discord.Embed(title=f"{emoji} System Message {emoji}",
                                   description=sys_msg_title,
-                                  colour=signal)
+                                  colour=c)
         sys_embed.add_field(name='Message',
                             value=message)
 
@@ -438,3 +446,38 @@ class CustomMessages:
         """
         msg_streamed = self.filter_message(message=message, tx_type=tx_type)
         await ctx.channel.send(content=msg_streamed, delete_after=360)
+
+    @staticmethod
+    async def send_special_char_notification(channel, tx: dict):
+        special_char = Embed(title=':monkey: Business ',
+                             description='Special characters have been identified in MEMO',
+                             colour=Colour.red())
+        special_char.add_field(name='Transaction details',
+                               value=f'{tx}')
+        await channel.send(embed=special_char)
+
+    async def send_transfer_notification(self, ctx, member, sys_channel, normal_amount, emoji: str,
+                                         chain_name: str):
+        """
+        Function send information to corporate channel on corp wallet activity
+        :param ctx: Discord Context
+        :param member: Member to where funds have been transferred
+        :param channel_id: channel ID applied for notifications
+        :param normal_amount: converted amount from atomic
+        :param emoji: emoji identification for the currency
+        :param chain_name: name of the chain used in transactions
+        :return: discord.Embed
+        """
+
+        corp_channel = Embed(
+            title=f'__{emoji} Corporate account transfer activity__ {emoji}',
+            description=f'Notification on corporate funds transfer activity on {chain_name}',
+            colour=Colour.greyple())
+        corp_channel.add_field(name='Author',
+                               value=f'{ctx.message.author}',
+                               inline=False)
+        corp_channel.add_field(name='Destination',
+                               value=f'{member}')
+        corp_channel.add_field(name='Amount',
+                               value=f'{normal_amount} {emoji}')
+        await sys_channel.send(embed=corp_channel)
