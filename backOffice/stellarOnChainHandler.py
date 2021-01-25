@@ -8,8 +8,10 @@ import sys
 project_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_path)
 
-from stellar_sdk import Account, Server, Keypair, TransactionEnvelope, Payment, Network, TransactionBuilder, exceptions, \
-    ChangeTrust
+from stellar_sdk import Account, Server, Keypair, TransactionEnvelope, Payment, Network, TransactionBuilder, exceptions
+from stellar_sdk.sep import stellar_uri
+from stellar_sdk import TextMemo, Asset
+from stellar_sdk.exceptions import NotFoundError
 
 from utils.tools import Helpers
 
@@ -21,23 +23,52 @@ class StellarWallet:
 
     """
 
-    def __init__(self):
+    def __init__(self, horizon_url: str, integrated_coins):
         helpers = Helpers()
         secret_details = helpers.read_json_file(file_name="walletSecrets.json")  # Load Stellar wallet secrets
         public_details = helpers.read_json_file(file_name="hotWallets.json")  # Load hot wallet details
-        self.integrated_coins = helpers.read_json_file(file_name='integratedCoins.json')
+        self.integrated_coins = integrated_coins
         self.public_key = public_details["xlm"]
+        self.dev_key = public_details["xlmDev"]
         self.private_key = secret_details['stellar']
         self.root_keypair = Keypair.from_secret(self.private_key)
         self.root_account = Account(account_id=self.root_keypair.public_key, sequence=1)
-        self.server = Server(horizon_url="https://horizon-testnet.stellar.org")  # Testnet
+        self.server = Server(horizon_url=horizon_url)  # Testnet
 
-    def __base_fee(self):
+        # Decide network type
+        if horizon_url == "https://horizon-testnet.stellar.org":
+            self.networkPhrase = Network.TESTNET_NETWORK_PASSPHRASE
+            self.network_type = 'testnet'
+        else:
+            self.networkPhrase = Network.PUBLIC_NETWORK_PASSPHRASE
+            self.network_type = 'pub-net'
+
+    def create_stellar_account(self):
         """
-        Get the base fee from the network
+        Creates inactive stellar account which needs to be activated by depositing lumens
         """
-        fee = self.server.fetch_base_fee()
-        return fee
+        try:
+            key_pair = Keypair.random()
+            public_key = key_pair.public_key
+            private_key = key_pair.secret
+            return {f'address': f'{public_key}',
+                    f'secret': f'{private_key}',
+                    "network": f'{self.network_type}'}
+        except NotFoundError:
+            return {}
+
+    def generate_uri(self, address: str, memo: str):
+
+        """
+        Returns Transaction as envelope
+        """
+
+        return stellar_uri.PayStellarUri(destination=address,
+                                         memo=TextMemo(text=memo),
+                                         asset=Asset.native(),
+                                         network_passphrase=self.networkPhrase,
+                                         message='Deposit to Discord',
+                                         ).to_uri()
 
     @staticmethod
     def __filter_error(result_code):
@@ -48,25 +79,13 @@ class StellarWallet:
         else:
             return result_code
 
-    @staticmethod
-    def __decode_processed_withdrawal_envelope(envelope_xdr):
-        """
-        Decode envelope and get details
-        Credits to overcat :
-        https://stellar.stackexchange.com/questions/3022/how-can-i-get-the-value-of-the-stellar-transaction/3025#3025
-        :param envelope_xdr: Xdr envelope from stellar network
-        :return: Decoded transaction details
-        """
-        te = TransactionEnvelope.from_xdr(envelope_xdr, Network.TESTNET_NETWORK_PASSPHRASE)
-        operations = te.transaction.operations
-
-        for op in operations:
-            if isinstance(op, Payment):
-                asset = op.asset.to_dict()
-                if asset.get('type') == 'native':
-                    asset['code'] = 'XLM'  # Appending XLM code to asset incase if native
-                asset["amount"] = op.to_xdr_amount(op.amount)
-                return asset
+    def check_if_account_activate(self, address):
+        "Try to load account on the network"
+        try:
+            self.server.load_account(account_id=address)
+            return True
+        except NotFoundError:
+            return False
 
     def get_stellar_hot_wallet_details(self):
         """
@@ -89,8 +108,7 @@ class StellarWallet:
         else:
             return {}
 
-    @staticmethod
-    def decode_transaction_envelope(envelope_xdr):
+    def decode_transaction_envelope(self, envelope_xdr):
         """
         Decode envelope and get details
         Credits to overcat :
@@ -98,15 +116,18 @@ class StellarWallet:
         :param envelope_xdr: Xdr envelope from stellar network
         :return: Decoded transaction details
         """
-        te = TransactionEnvelope.from_xdr(envelope_xdr, Network.TESTNET_NETWORK_PASSPHRASE)
+        te = TransactionEnvelope.from_xdr(envelope_xdr, self.networkPhrase)
         operations = te.transaction.operations
 
+        # TODO make multiple payments inside one transaction
+        amount = 0
         for op in operations:
             if isinstance(op, Payment):
                 asset = op.asset.to_dict()
                 if asset.get('type') == 'native':
                     asset['code'] = 'XLM'  # Appending XLM code to asset incase if native
                 asset["amount"] = op.to_xdr_amount(op.amount)
+                # TODO count all deposits
                 return asset
 
     def get_incoming_transactions(self, pag=None):
@@ -133,7 +154,6 @@ class StellarWallet:
                 tx.pop('signatures')
                 tx['asset_type'] = self.decode_transaction_envelope(envelope_xdr=tx['envelope_xdr'])
                 tx.pop('envelope_xdr')
-                tx.pop('valid_after')
                 to_process.append(tx)
         return to_process
 
@@ -162,14 +182,14 @@ class StellarWallet:
         source_account = self.server.load_account(self.public_key)
         tx = TransactionBuilder(
             source_account=source_account,
-            network_passphrase=Network.TESTNET_NETWORK_PASSPHRASE,
+            network_passphrase=self.networkPhrase,
             base_fee=self.server.fetch_base_fee()).append_payment_op(
             asset_issuer=asset_issuer,
             destination=address, asset_code=token.upper(), amount=amount).set_timeout(30).build()
         tx.sign(self.root_keypair)
         try:
             resp = self.server.submit_transaction(tx)
-            details = self.__decode_processed_withdrawal_envelope(envelope_xdr=resp['envelope_xdr'])
+            details = self.decode_transaction_envelope(envelope_xdr=resp['envelope_xdr'])
             end_details = {
                 "asset": details['code'],
                 "explorer": resp['_links']['transaction']['href'],
@@ -202,7 +222,7 @@ class StellarWallet:
             source_account = self.server.load_account(public_key)
             tx = TransactionBuilder(
                 source_account=source_account,
-                network_passphrase=Network.TESTNET_NETWORK_PASSPHRASE,
+                network_passphrase=self.networkPhrase,
                 base_fee=self.server.fetch_base_fee()).append_change_trust_op(asset_code=f'{token.upper()}',
                                                                               asset_issuer=asset_issuer).set_timeout(
                 30).build()

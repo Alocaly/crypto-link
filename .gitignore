@@ -144,6 +144,8 @@ walletSecrets.json
 /CLEnvironment/
 CLEnv/
 lastTweet.json
-testScripts.py
+masterKey.json
+utils/securityManager.py
+
 
 

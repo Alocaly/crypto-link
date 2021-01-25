@@ -16,7 +16,6 @@ class AccountManager(object):
     def __init__(self, connection):
         # main db connection
         self.connection = connection
-
         # Database of bot users
         self.cl_connection = self.connection['CryptoLink']
         self.user_profiles = self.cl_connection.userProfiles
@@ -76,7 +75,8 @@ class AccountManager(object):
         result = self.user_profiles.find_one({"userId": discord_id},
                                              {"_id": 0,
                                               "xlm": 1,
-                                              "clt": 1})
+                                              "clt": 1,
+                                              "bridges": 1})
 
         return result
 
@@ -92,10 +92,11 @@ class AccountManager(object):
 
         self.__create_user_wallet(discord_id=discord_id, discord_username=discord_username,
                                   deposit_id=stellar_deposit_id)
-        new_user = {
+        new_user_stats = {
             "userId": discord_id,
             "userName": discord_username,
             "stellarDepositId": stellar_deposit_id,
+            "bridges": int(0),
             "xlm": {"depositsCount": int(0),
                     "totalDeposited": float(0.0),
                     "withdrawalsCount": int(0),
@@ -114,30 +115,11 @@ class AccountManager(object):
                     'emojiTotalCount': float(0.0),
                     'multiTxCount': int(0),
                     'multiTotalCount': float(0.0)
-                    },
-
-            "clt": {"depositsCount": int(0),
-                    "totalDeposited": float(0.0),
-                    "withdrawalsCount": int(0),
-                    "totalWithdrawn": float(0.0),
-                    'privateTxSendCount': int(0),
-                    "privateTxReceivedCount": int(0),
-                    'privateSent': float(0.0),
-                    'privateReceived': float(0.0),
-                    'publicTxSendCount': int(0),
-                    "publicTxReceivedCount": int(0),
-                    'publicSent': float(0.0),
-                    'publicReceived': float(0.0),
-                    'spentOnRoles': float(0.0),
-                    'roleTxCount': int(0),
-                    'emojiTxCount': int(0),
-                    'emojiTotalCount': float(0.0),
-                    'multiTxCount': int(0),
-                    'multiTotalCount': float(0.0)
-                    }}
+                    }
+        }
 
         try:
-            self.user_profiles.insert_one(new_user)
+            self.user_profiles.insert_one(new_user_stats)
             return True
         except errors.PyMongoError:
             return False
@@ -155,6 +137,10 @@ class AccountManager(object):
             return True
         else:
             return False
+
+    def count_registrations(self):
+        result = self.user_profiles.count_documents({})
+        return result
 
     def get_user_memo(self, user_id: int):
         """
