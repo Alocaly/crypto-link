@@ -33,59 +33,6 @@ class MerchantManager:
         # Collection of applied users in the system
         self.applied_users = self.communities.MerchantAppliedUsers
 
-        # Collection of all applied communities who payed for the fees
-        self.active_licenses = self.communities.MerchantPurchasedLicenses
-
-    def check_community_license_status(self, community_id):
-        """
-        Checks if community has already live license
-        :param community_id:
-        :return:
-        """
-        data = self.active_licenses.find_one({"communityId": int(community_id)})
-        return data
-
-    def get_community_license_details(self, community_id):
-        """
-        Get license details from active community
-        :param community_id:
-        :return:
-        """
-        data = self.active_licenses.find_one({"communityId": int(community_id)},
-                                             {"_id": 0})
-        return data
-
-    def insert_license(self, new_license: dict):
-        """
-        Insert license into directory of active licenses
-        """
-        try:
-            self.active_licenses.insert_one(new_license)
-            return True
-        except errors.PyMongoError:
-            return False
-
-    def get_over_due_communities(self, timestamp: int):
-        """
-        Returns all communities who have expired licenses
-        :param timestamp: unix time stamp
-        :return:
-        """
-        all_communities = list(self.active_licenses.find({"end": {"$lt": timestamp}}))
-        return all_communities
-
-    def remove_over_due_community(self, discord_id):
-        """
-        Removes the overdue from community based on discord id
-        :param discord_id:
-        :return:
-        """
-        try:
-            self.active_licenses.delete_one({'communityId': int(discord_id)})
-            return True
-        except errors.PyMongoError:
-            return False
-
     def check_if_community_exist(self, community_id: int):
         """
         Check if community is registered into the system
@@ -145,7 +92,7 @@ class MerchantManager:
             "communityId": int(community_id),
             "communityOwner": int(community_owner_id),
             "communityName": community_name,
-            "balance": int(0),
+            "xlm": int(0),
             "overallGained": int(0),
             "rolesObtained": int(0)
         }
@@ -165,7 +112,7 @@ class MerchantManager:
         """
         stellar_wallet = self.community_stellar_wallets.find_one({"communityId": community_id},
                                                                  {"_id": 0,
-                                                                  "balance": 1})
+                                                                  "xlm": 1})
 
         return stellar_wallet
 
@@ -185,13 +132,11 @@ class MerchantManager:
         if wallet_tick == 'xlm':
             try:
                 self.community_stellar_wallets.update_one({"communityId": community_id},
-                                                          {"$inc": {"balance": amount}})
+                                                          {"$inc": {"xlm": amount}})
                 return True
-            except errors.PyMongoError as e:
-                print(e)
+            except errors.PyMongoError:
                 return False
         else:
-            print('Currency in community merchant wallet not found')
             return False
 
     def add_user_to_payed_roles(self, purchase_data: dict):
@@ -225,7 +170,7 @@ class MerchantManager:
         except errors.PyMongoError:
             return False
 
-    def check_user_roles(self, user_id, discord_id):
+    def check_user_roles(self, user_id: int, discord_id: int) -> list:
         """
         return roles which user has obtained on the community
         :param user_id:
@@ -307,8 +252,8 @@ class MerchantManager:
         if ticker == 'xlm':
             stellar_wallet = self.community_stellar_wallets.find_one({"communityId": community_id},
                                                                      {"_id": 0,
-                                                                      "balance": 1})
-            return stellar_wallet['balance']
+                                                                      "xlm": 1})
+            return stellar_wallet['xlm']
 
         else:
             return None

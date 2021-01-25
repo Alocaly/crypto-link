@@ -9,8 +9,9 @@ from datetime import datetime
 from discord import Embed, Colour
 from discord.ext import commands
 from git import Repo, InvalidGitRepositoryError
-from cogs.utils.monetaryConversions import get_decimal_point, get_normal, get_rates, convert_to_currency
-from cogs.utils.customCogChecks import is_animus, is_one_of_gods
+from cogs.utils.monetaryConversions import get_normal, get_rates, convert_to_currency
+
+from utils.customCogChecks import is_animus, is_one_of_gods
 from cogs.utils.systemMessaages import CustomMessages
 from utils.tools import Helpers
 
@@ -27,11 +28,12 @@ CONST_CORP_TRANSFER_ERROR_TITLE = '__Corporate Transfer Error__'
 CONST_MERCHANT_LICENSE_CHANGE = '__Merchant monthly license change information__'
 CONST_WARNING_TITLE = f':warning: __Restricted area__ :warning: '
 CONST_WARNING_MESSAGE = f'You do not have rights to access this are of the bot'
+CONST_FEE_INFO = '__Stellar Lumen withdrawal fee information__'
 
 # Extensions integrated into Crypto Link
 extensions = ['cogs.help', 'cogs.transactions', 'cogs.accounts',
               'cogs.system', 'cogs.withdrawals',
-              'cogs.guildMerchant', 'cogs.consumer', 'cogs.automatic', 'cogs.licensing', 'cogs.guildOwners']
+              'cogs.guildMerchant', 'cogs.consumer', 'cogs.automatic', 'cogs.guildOwners']
 
 
 class BotManagementCommands(commands.Cog):
@@ -104,27 +106,23 @@ class BotManagementCommands(commands.Cog):
             await custom_messages.embed_builder(ctx=ctx, title=title, description=description, data=list_of_values,
                                                 destination=ctx.message.author, thumbnail=self.bot.user.avatar_url)
 
-    @cl.command()
-    @commands.check(is_one_of_gods)
-    async def balance(self, ctx):
+    @cl.command(aliases=['balance'])
+    async def bal(self, ctx):
         """
         Check the off-chain balance status of Crypto Link system
         """
-        print(f'CL BALANCE : {ctx.author} -> {ctx.message.content}')
         data = self.backoffice.bot_manager.get_bot_wallets_balance()
         values = Embed(title="Balance of Crypto-Link Off chain balance",
                        description="Current state of Crypto Link Lumen wallet",
                        color=Colour.blurple())
         for bal in data:
             ticker = bal['ticker']
-            print(ticker)
-            decimal = get_decimal_point(ticker)
             conversion = int(bal["balance"])
-            normal = get_normal(conversion, decimal)
+            normal = get_normal(conversion, 7)
             values.add_field(name=ticker.upper(),
                              value=f'{normal}',
                              inline=False)
-        await ctx.channel.send(embed=values, delete_after=100)
+        await ctx.channel.send(embed=values)
 
     @cl.command()
     async def stats(self, ctx):
@@ -165,15 +163,15 @@ class BotManagementCommands(commands.Cog):
         off_chain.add_field(name=f'Total Transactions done',
                             value=f'{cl_off_chain["totalTx"]}')
         off_chain.add_field(name=f'Total XLM moved',
-                            value=f'{cl_off_chain["totalMoved"]}')
+                            value=f'{round(cl_off_chain["totalMoved"],7)}')
         off_chain.add_field(name=f'Total Public TX',
                             value=f'{cl_off_chain["totalPublicCount"]}')
         off_chain.add_field(name=f'Total Public Moved',
-                            value=f'{cl_off_chain["totalPublicMoved"]}')
+                            value=f'{round(cl_off_chain["totalPublicMoved"],7)}')
         off_chain.add_field(name=f'Total Private TX',
                             value=f'{cl_off_chain["totalPrivateCount"]}')
         off_chain.add_field(name=f'Total Private Moved',
-                            value=f'{cl_off_chain["totalPrivateMoved"]}')
+                            value=f'{round(cl_off_chain["totalPrivateMoved"],7)}')
         off_chain.add_field(name=f'Total Emoji Tx',
                             value=f'{cl_off_chain["totalEmojiTx"]}')
         off_chain.add_field(name=f'Total Emoji Moved',
@@ -209,7 +207,7 @@ class BotManagementCommands(commands.Cog):
                     # Deduct the balance from the community balance
                     if self.backoffice.bot_manager.update_lpi_wallet_balance(amount=balance, wallet="xlm", direction=2):
                         # Store in history and send notifications to owner and to channel
-                        dec_point = get_decimal_point(symbol='xlm')
+                        dec_point = 7
                         normal_amount = get_normal(str(balance), decimal_point=dec_point)
 
                         # Store into the history of corporate transfers
@@ -256,7 +254,7 @@ class BotManagementCommands(commands.Cog):
 
     #############################  Crypto Link System #############################
 
-    @commands.group()
+    @commands.group(aliases=["sys"])
     @commands.check(is_one_of_gods)
     async def system(self, ctx):
         if ctx.invoked_subcommand is None:
@@ -270,9 +268,13 @@ class BotManagementCommands(commands.Cog):
                                                 description='Available commands under category ***system***',
                                                 data=value)
 
-    @system.command()
+    @system.command(aliases=["stop"])
     async def off(self, ctx):
-        await ctx.channel.send(content='Going Offline!')
+        guild = await self.bot.fetch_guild(guild_id=756132394289070102)
+        role = guild.get_role(role_id=773212890269745222)
+        channel = self.bot.get_channel(id=int(773157463628709898))
+        message = f':robot: {role.mention} I am going Offline for Maintenance'
+        await channel.send(content=message)
         await self.bot.close()
         sys.exit(0)
 
@@ -467,8 +469,6 @@ class BotManagementCommands(commands.Cog):
     @commands.command()
     async def fees(self, ctx):
         fees = self.backoffice.bot_manager.get_all_fees()
-        from pprint import pprint
-        pprint(fees)
         fee_info = Embed(title='Applied fees for system',
                          description='State of fees for each segment of the bot',
                          colour=Colour.blue())
@@ -476,17 +476,18 @@ class BotManagementCommands(commands.Cog):
         rates = get_rates(coin_name='stellar')
         for data in fees:
             if not data.get('fee_list'):
-                conversion = convert_to_currency(amount=float(data['fee']), coin_name='stellar')
-                fee_type = self.filter_db_keys(fee_type=data['type'])
-
-                fee_info.add_field(name=fee_type,
-                                   value=f"XLM = {conversion['total']} {CONST_STELLAR_EMOJI}\n"
-                                         f"Dollar = {data['fee']}$",
-                                   inline=False)
+                # conversion = convert_to_currency(amount=float(data['fee']), coin_name='stellar')
+                # fee_type = self.filter_db_keys(fee_type=data['type'])
+                #
+                # fee_info.add_field(name=fee_type,
+                #                    value=f"XLM = {conversion['total']} {CONST_STELLAR_EMOJI}\n"
+                #                          f"Dollar = {data['fee']}$",
+                #                    inline=False)
+                pass
             else:
                 fee_type = self.filter_db_keys(fee_type=data['type'])
                 fee_info.add_field(name=fee_type,
-                                   value=f"{data['fee_list']}",
+                                   value=f"{data['fee_list']['xlm']} XLM",
                                    inline=False)
 
         fee_info.add_field(name='Conversion rates',
@@ -557,20 +558,17 @@ class BotManagementCommands(commands.Cog):
             }
             if self.backoffice.bot_manager.manage_fees_and_limits(key='withdrawals', data_to_update=fee_data):
                 message = f'You have successfully set Stellar Lumen withdrawal fee to be {rounded}$.'
-                title = '__Stellar Lumen withdrawal fee information__'
                 await custom_messages.system_message(ctx=ctx, color_code=0, message=message, destination=1,
-                                                     sys_msg_title=title)
+                                                     sys_msg_title=CONST_FEE_INFO)
             else:
                 message = f'There has been an error while trying to set Stellar Lumen withdrawal fee to {rounded}$.' \
                           f'Please try again later or contact system administrator!'
-                title = '__Stellar Lumen withdrawal fee information__'
                 await custom_messages.system_message(ctx=ctx, color_code=1, message=message, destination=0,
-                                                     sys_msg_title=title)
+                                                     sys_msg_title=CONST_FEE_INFO)
         else:
             message = f'Coin {ticker} not listed yet'
-            title = '__Stellar Lumen withdrawal fee information__'
             await custom_messages.system_message(ctx=ctx, color_code=1, message=message, destination=0,
-                                                 sys_msg_title=title)
+                                                 sys_msg_title=CONST_FEE_INFO)
 
     @change.command()
     async def min_merchant_transfer(self, ctx, value: float):
@@ -653,19 +651,19 @@ class BotManagementCommands(commands.Cog):
                                                  sys_msg_title=CONST_WARNING_MESSAGE)
 
     @system.error
-    async def system_error(self, ctx, error):
+    async def sys_error(self, ctx, error):
         if isinstance(error, commands.CheckFailure):
             await custom_messages.system_message(ctx=ctx, color_code=1, message=CONST_WARNING_TITLE, destination=1,
                                                  sys_msg_title=CONST_WARNING_MESSAGE)
 
     @cogs.error
-    async def manage_error(self, ctx, error):
+    async def mng_error(self, ctx, error):
         if isinstance(error, commands.CheckFailure):
             await custom_messages.system_message(ctx=ctx, color_code=1, message=CONST_WARNING_TITLE, destination=1,
                                                  sys_msg_title=CONST_WARNING_MESSAGE)
 
     @hot.error
-    async def hot_error(self, ctx, error):
+    async def h_error(self, ctx, error):
         if isinstance(error, commands.CheckFailure):
             await custom_messages.system_message(ctx=ctx, color_code=1, message=CONST_WARNING_TITLE, destination=1,
                                                  sys_msg_title=CONST_WARNING_MESSAGE)

@@ -1,13 +1,10 @@
 from datetime import datetime
 
-import discord
 from discord import errors
-from discord import Role, Embed, Colour, TextChannel
-from utils.tools import Helpers
+from discord import Role, Embed, Colour, TextChannel, User
 
-helper = Helpers()
 CONST_STELLAR_EMOJI = '<:stelaremoji:684676687425961994>'
-notification_channels = helper.read_json_file(file_name='autoMessagingChannels.json')
+CONST_HASH_STR = ':hash: Transaction Hash :hash: '
 
 
 class CustomMessages:
@@ -21,7 +18,8 @@ class CustomMessages:
         """
         pass
 
-    def filter_message(self, message, tx_type: str):
+    @staticmethod
+    def filter_message(message, tx_type: str):
         msg_streamed = ''
         if tx_type == 'public':
             msg_streamed += message
@@ -30,17 +28,15 @@ class CustomMessages:
             msg_streamed += ":detective:"
 
         elif tx_type == 'emoji':
-            pass
+            msg_streamed += ":nerd:"
 
         elif tx_type == 'multi':
-            pass
-
-        elif tx_type == 'squad':
-            pass
+            msg_streamed += ":parachute: "
 
         return msg_streamed
 
-    def get_emoji(self, tx_type):
+    @staticmethod
+    def get_emoji(tx_type):
         if tx_type == 'public':
             emoji = ':cowboy:'
         elif tx_type == 'private':
@@ -48,21 +44,21 @@ class CustomMessages:
         return emoji
 
     @staticmethod
-    async def sys_deposit_notifications(channel, user: discord.User, tx_details: dict):
+    async def sys_deposit_notifications(channel, user: User, tx_details: dict):
         """
         Sending message to user on successful processed deposit
         """
 
-        notify = discord.Embed(title='System Deposit Notification',
-                               description='Deposit has been processed',
-                               timestamp=datetime.utcnow())
+        notify = Embed(title='System Deposit Notification',
+                       description='Deposit has been processed',
+                       timestamp=datetime.utcnow())
         notify.set_thumbnail(url=user.avatar_url)
         notify.add_field(name='User details',
                          value=f'{user} ID; {user.id}',
                          inline=False)
         notify.add_field(name='From',
                          value=f'{tx_details["source_account"]}', inline=False)
-        notify.add_field(name='Tx hash',
+        notify.add_field(name=CONST_HASH_STR,
                          value=f'{tx_details["hash"]}')
         notify.add_field(name='Deposit Value',
                          value=f"Amount: {int(tx_details['asset_type']['amount']) / 10000000:9.7f} {tx_details['asset_type']['code']}",
@@ -75,10 +71,10 @@ class CustomMessages:
         deposit or memo could not be identifies
         """
 
-        notify = discord.Embed(title=':warning: System Deposit Notification :warning:',
-                               description='Unidentified Deposit',
-                               timestamp=datetime.utcnow(),
-                               colour=Colour.red())
+        notify = Embed(title=':warning: System Deposit Notification :warning:',
+                       description='Unidentified Deposit',
+                       timestamp=datetime.utcnow(),
+                       colour=Colour.red())
         notify.add_field(name='From',
                          value=f'{tx_details["source_account"]}', inline=False)
         notify.add_field(name='Tx hash',
@@ -102,45 +98,66 @@ class CustomMessages:
         """
 
         if not c:
-            c = discord.Colour.gold()
+            c = Colour.gold()
 
-        embed = discord.Embed(title=title,
-                              description=description,
-                              colour=c)
+        embed = Embed(title=title,
+                      description=description,
+                      colour=c)
         for d in data:
             embed.add_field(name=d['name'],
                             value=d['value'],
                             inline=False)
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
-        if destination:
-            await ctx.author.send(embed=embed)
-        else:
-            await ctx.channel.send(embed=embed, delete_after=40)
+        try:
+            if destination:
+                await ctx.author.send(embed=embed)
+            else:
+                await ctx.channel.send(embed=embed, delete_after=40)
+        except Exception:
+            await ctx.channel.send(embed=embed)
 
     @staticmethod
-    async def system_message(ctx, message: str, color_code, destination: int, sys_msg_title: str = None):
+    async def bridge_notification(ctx, recipient):
+        bridge_info = Embed(title=f':bridge_at_night: New Bridge Created :bridge_at_night: ',
+                            description=f":construction_worker: You have successfully created new bridge between "
+                                        f"Discord user and Stellar. ",
+                            colour=Colour.green())
+        bridge_info.add_field(name=f'Destination',
+                              value=f'{recipient} (ID: {recipient.id})',
+                              inline=False)
+        bridge_info.add_field(name=f':information_source: Explanation :information_source: ',
+                              value=f'Since recipient did not have wallet yet in the system, it has been '
+                                    f'automatically created in order for the payment to reach its destination. '
+                                    f'With every new account bridges are established and adoption of Stellar increased.'
+                                    f' Keep on building')
+        await ctx.author.send(embed=bridge_info)
+
+    @staticmethod
+    async def system_message(ctx, message: str, color_code, destination: int, sys_msg_title: str = None,
+                             embed_title: str = None):
         """
         Custom System Messages
         """
-        if isinstance(color_code,Colour):
-            emoji = "robot"
+        # Color filtering
+        if isinstance(color_code, Colour):
+            emoji = ":robot:"
             c = color_code
         else:
             if color_code == 0:
                 c = 0x319f6b
                 emoji = ":robot: "
             else:
-                c = discord.Colour.red()
+                c = Colour.red()
                 emoji = ":warning:"
 
-        if sys_msg_title is None:
-            sys_msg_title = 'System Message'
+        if embed_title is None:
+            embed_title = 'System Message'
 
-        sys_embed = discord.Embed(title=f"{emoji} System Message {emoji}",
-                                  description=sys_msg_title,
-                                  colour=c)
-        sys_embed.add_field(name='Message',
+        sys_embed = Embed(title=f"{embed_title}",
+                          description=sys_msg_title,
+                          colour=c)
+        sys_embed.add_field(name=':information_source:',
                             value=message)
 
         if destination == 0:
@@ -167,34 +184,37 @@ class CustomMessages:
 
         if direction == 0:
             title = f':outbox_tray: Outgoing {tx_type_emoji} **__{tx_type.title()}__** transaction :outbox_tray: '
-            col = discord.Colour.red()
+            col = Colour.red()
             destination_txt = f'{tx_type_emoji} Recipient {tx_type_emoji} '
+            value_emoji = ":money_with_wings: "
             avatar = user.avatar_url
 
         elif direction == 1:
             title = f':inbox_tray: Incoming {tx_type_emoji} {tx_type.title()} transaction :inbox_tray: '
-            col = discord.Colour.green()
-            destination_txt = ':postbox:  Sender :postbox: '
+            col = Colour.green()
+            destination_txt = ':postbox: Sender :postbox: '
             avatar = destination.avatar_url
+            value_emoji = ":moneybag: "
 
-        tx_report = discord.Embed(title=title,
-                                  colour=col,
-                                  timestamp=datetime.utcnow())
+        tx_report = Embed(title=title,
+                          colour=col,
+                          timestamp=datetime.utcnow())
         tx_report.set_thumbnail(url=avatar)
         tx_report.add_field(name=f'{destination_txt}',
-                            value=f'{user}',
+                            value=f'`{user}`',
                             inline=False)
         tx_report.add_field(name=':post_office: Guild Origin :post_office: ',
                             value=f'{ctx.message.guild} ({ctx.message.guild.id})',
                             inline=False)
         tx_report.add_field(name=':love_letter: Note :love_letter: ',
-                            value=message)
-        tx_report.add_field(name='Transaction value',
-                            value=f'{transaction_data["amount"]} {transaction_data["emoji"]} (${transaction_data["conversion"]})',
+                            value=f'`{message}`')
+        tx_report.add_field(name=f'{value_emoji} Transaction value {value_emoji}',
+                            value=f'`{transaction_data["amount"]:.7f} {transaction_data["emoji"]} '
+                                  f'(${transaction_data["conversion"]})`',
                             inline=False)
         if transaction_data["conversion"] != 0:
-            tx_report.add_field(name='Conversion Rate',
-                                value=f'${transaction_data["conversionRate"]}/{transaction_data["ticker"]}',
+            tx_report.add_field(name=':currency_exchange: Conversion Rate :currency_exchange: ',
+                                value=f'${transaction_data["conversionRate"]:.4f}/{transaction_data["ticker"]}',
                                 inline=False)
         tx_report.set_footer(text='Conversion rates provided by CoinGecko',
                              icon_url='https://static.coingecko.com/s/thumbnail-'
@@ -207,48 +227,48 @@ class CustomMessages:
             print('========================')
 
     @staticmethod
-    async def deposit_notification_message(recipient: discord.User, tx_details: dict):
+    async def deposit_notification_message(recipient: User, tx_details: dict):
 
-        sys_embed = discord.Embed(title=":inbox_tray: __Deposit Processed__ :inbox_tray: ",
-                                  description=f'Deposit processed successfully!',
-                                  colour=Colour.dark_purple(),
-                                  timestamp=datetime.utcnow())
-        sys_embed.add_field(name='From',
+        sys_embed = Embed(title=":inbox_tray: __Deposit Processed__ :inbox_tray: ",
+                          description=f'Deposit processed successfully!',
+                          colour=Colour.dark_purple(),
+                          timestamp=datetime.utcnow())
+        sys_embed.add_field(name=':map: From :map: ',
                             value=f'{tx_details["source_account"]}', inline=False)
-        sys_embed.add_field(name='Tx hash',
+        sys_embed.add_field(name=CONST_HASH_STR,
                             value=f'{tx_details["hash"]}',
                             inline=False)
-        sys_embed.add_field(name=f'Asset',
+        sys_embed.add_field(name=f':gem: Asset :gem: ',
                             value=f'{tx_details["asset_type"]["code"]}')
-        sys_embed.add_field(name="Amount",
+        sys_embed.add_field(name=":moneybag: Amount :moneybag: ",
                             value=f"{int(tx_details['asset_type']['amount']) / 10000000:9.7f}",
                             inline=False)
         await recipient.send(embed=sys_embed)
 
     @staticmethod
     async def withdrawal_notify(ctx, withdrawal_data: dict, fee):
-        notify = discord.Embed(title="Withdrawal Notification",
-                               description=f'Withdrawal Successfully processed',
-                               timestamp=datetime.utcnow(),
-                               colour=discord.Colour.green())
+        notify = Embed(title=":outbox_tray: Withdrawal Notification :outbox_tray:",
+                       description=f'Withdrawal Successfully processed',
+                       timestamp=datetime.utcnow(),
+                       colour=Colour.green())
 
-        notify.add_field(name="Time of withdrawal",
+        notify.add_field(name=":calendar: Time of withdrawal :calendar: ",
                          value=str(datetime.utcnow()),
                          inline=False)
-        notify.add_field(name='Destination',
-                         value=withdrawal_data["destination"],
+        notify.add_field(name=':map: Destination :map: ',
+                         value=f'```{withdrawal_data["destination"]}```',
                          inline=False)
-        notify.add_field(name='Transaction hash',
-                         value=withdrawal_data["hash"],
+        notify.add_field(name=CONST_HASH_STR,
+                         value=f'`{withdrawal_data["hash"]}`',
                          inline=False)
-        notify.add_field(name='Withdrawal asset details',
-                         value=f'{round(withdrawal_data["amount"] / 10000000, 7)} {withdrawal_data["asset"]}',
+        notify.add_field(name=':receipt: Withdrawal asset details :receipt: ',
+                         value=f'`{round(withdrawal_data["amount"] / 10000000, 7):.7f} {withdrawal_data["asset"]}`',
                          inline=False)
-        notify.add_field(name='Crypto Link Fee',
-                         value=fee,
+        notify.add_field(name=':money_mouth: Crypto Link Fee :money_mouth: ',
+                         value=f'`{fee}`',
                          inline=False)
-        notify.add_field(name='Explorer Link',
-                         value=withdrawal_data['explorer'],
+        notify.add_field(name=':sunrise: Horizon Access Link :sunrise: ',
+                         value=f"[Complete Details]({withdrawal_data['explorer']})",
                          inline=False)
         notify.set_thumbnail(url=ctx.message.author.avatar_url)
 
@@ -256,13 +276,13 @@ class CustomMessages:
             await ctx.author.send(embed=notify)
 
         except errors.DiscordException:
-            error_msg = discord.Embed(title=f'Withdrawal Notification',
-                                      description=f'You have received this message because'
-                                                  f' withdrawal notification could not be'
-                                                  f' send to DM. Please allow bot to send'
-                                                  f' you messages',
-                                      colour=discord.Colour.green())
-            error_msg.add_field(name='Explorer Link',
+            error_msg = Embed(title=f':warning: Withdrawal Notification :warning:',
+                              description=f'You have received this message because'
+                                          f' withdrawal notification could not be'
+                                          f' send to DM. Please allow bot to send'
+                                          f' you messages',
+                              colour=Colour.green())
+            error_msg.add_field(name=':compass: Explorer Link :compass:',
                                 value=withdrawal_data['explorer'])
             error_msg.set_footer(text='This message will self-destruct in 360 seconds')
             await ctx.channel.send(embed=error_msg, content=f'{ctx.message.author.mention}',
@@ -271,9 +291,9 @@ class CustomMessages:
     @staticmethod
     async def withdrawal_notification_channel(ctx, channel, withdrawal_data):
         # create withdrawal notification for channel
-        notify = discord.Embed(title='Stellar Withdrawal Notification',
-                               description='Withdrawal has been processed',
-                               colour=discord.Colour.gold())
+        notify = Embed(title='Stellar Withdrawal Notification',
+                       description='Withdrawal has been processed',
+                       colour=Colour.gold())
         if isinstance(ctx.channel, TextChannel):
             notify.add_field(name='Origin',
                              value=f'{ctx.message.guild} ID; {ctx.message.guild.id}',
@@ -293,11 +313,11 @@ class CustomMessages:
         await channel.send(embed=notify)
 
     @staticmethod
-    async def cl_staff_incoming_funds_notification(sys_channel: discord.TextChannel, incoming_fees: str):
-        notify = discord.Embed(title='Bot Stellar Wallet Activity',
-                               description='Bot Wallet has been credited because user '
-                                           'has initiated on-chain withdrawal',
-                               color=discord.Colour.blurple())
+    async def cl_staff_incoming_funds_notification(sys_channel: TextChannel, incoming_fees: str):
+        notify = Embed(title='Bot Stellar Wallet Activity',
+                       description='Bot Wallet has been credited because user '
+                                   'has initiated on-chain withdrawal',
+                       color=Colour.blurple())
         notify.add_field(name='Value',
                          value=f'{incoming_fees}')
         await sys_channel.send(embed=notify)
@@ -305,11 +325,11 @@ class CustomMessages:
     @staticmethod
     async def user_role_purchase_msg(ctx, role: Role, role_details: dict):
         # Send notification to user
-        role_embed = discord.Embed(name=':shopping_cart: __Membership purchase successful__ :shopping_cart: ',
-                                   title='Congratulations on '
-                                         'obtaining the role',
-                                   description='Details on obtained role',
-                                   colour=discord.Colour.gold())
+        role_embed = Embed(name=':shopping_cart: __Membership purchase successful__ :shopping_cart: ',
+                           title='Congratulations on '
+                                 'obtaining the role',
+                           description='Details on obtained role',
+                           colour=Colour.magenta())
         role_embed.set_thumbnail(url=ctx.message.guild.icon_url)
         role_embed.add_field(name=':convenience_store: Community :convenience_store:',
                              value=f'{ctx.message.guild}  \n'
@@ -336,13 +356,13 @@ class CustomMessages:
 
     @staticmethod
     async def guild_owner_role_purchase_msg(ctx, role: Role, role_details: dict):
-        incoming_funds = discord.Embed(
+        incoming_funds = Embed(
             name=':convenience_store: __Merchant system funds credited__ :convenience_store: ',
             title='__Incoming funds to corporate '
                   'wallet___',
             description=f'Role has been purchased on your community '
                         f'at {role_details["roleStart"]}.',
-            colour=discord.Colour.green())
+            colour=Colour.magenta())
 
         incoming_funds.add_field(name=':japanese_ogre: Role Purchased :japanese_ogre: ',
                                  value=f"Name: {role.name}\n"
@@ -397,36 +417,52 @@ class CustomMessages:
 
     @staticmethod
     async def stellar_wallet_overall(ctx, coin_stats: dict, utc_now):
-        for k, v in coin_stats.items():
-            coin_stats = Embed(title=f'{k.upper()} wallet statistics',
-                               description=f':bar_chart: ***__Statistical Data on Stellar Lumen Discord Wallet__*** '
-                                           f':bar_chart:',
-                               colour=Colour.light_grey(),
-                               timestamp=utc_now)
-            coin_stats.add_field(name=f':inbox_tray: Total Deposits',
-                                 value=f'Deposited ***{v["depositsCount"]}*** with total '
-                                       f'***{v["totalDeposited"]}*** ')
-            coin_stats.add_field(name=f'\u200b',
-                                 value='\u200b')
-            coin_stats.add_field(name=f':outbox_tray: Total Withdrawals ',
-                                 value=f'Withdrawn ***{v["withdrawalsCount"]}*** withdrawals with '
-                                       f'total ***{v["totalWithdrawn"]}*** ')
 
-            coin_stats.add_field(name=f':family_man_woman_boy: Public Tx',
-                                 value=f':incoming_envelope:{v["publicTxSendCount"]}\n'
-                                       f':money_with_wings:  {v["publicSent"]}\n'
-                                       f':envelope_with_arrow:{v["publicTxReceivedCount"]}\n'
-                                       f':money_mouth: {v["publicReceived"]} ')
-            coin_stats.add_field(name=f':detective: Private Tx',
-                                 value=f':incoming_envelope:{v["privateTxSendCount"]}\n'
-                                       f':money_with_wings: {v["privateSent"]}\n'
-                                       f':envelope_with_arrow: {v["privateTxReceivedCount"]}\n'
-                                       f':money_mouth: {v["privateReceived"]}')
-            coin_stats.add_field(name=f'Merchant purchases',
-                                 value=f':man_juggling: {v["roleTxCount"]}\n'
-                                       f':money_with_wings: {v["spentOnRoles"]}\n',
-                                 inline=False)
-            await ctx.author.send(embed=coin_stats)
+        try:
+            bridges = coin_stats['bridges']
+        except KeyError:
+            bridges = 0
+
+        building_bridges = Embed(title=f':construction_site:  Building Bridges :construction_site:',
+                                 description="Your Input on bridging the Stellar Network with Discord "
+                                             "Users through Crypto Link.",
+                                 colour=Colour.gold(),
+                                 timestamp=utc_now)
+        building_bridges.add_field(name=f':bridge_at_night: Created Bridges :bridge_at_night: ',
+                                   value=f'{bridges}')
+        await ctx.author.send(embed=building_bridges)
+
+        for k, v in coin_stats.items():
+            if k in ["xlm"]:
+                coin_stats = Embed(title=f'{k.upper()} wallet statistics',
+                                   description=f':bar_chart: ***__Statistical Data on Stellar Lumen Discord Wallet__*** '
+                                               f':bar_chart:',
+                                   colour=Colour.light_grey(),
+                                   timestamp=utc_now)
+                coin_stats.add_field(name=f':inbox_tray: Total Deposits :inbox_tray:',
+                                     value=f'Deposited ***{v["depositsCount"]}*** with total '
+                                           f'***{v["totalDeposited"]}*** ')
+                coin_stats.add_field(name=f'\u200b',
+                                     value='\u200b')
+                coin_stats.add_field(name=f':outbox_tray: Total Withdrawals :outbox_tray: ',
+                                     value=f'Withdrawn ***{v["withdrawalsCount"]}*** withdrawals with '
+                                           f'total ***{v["totalWithdrawn"]}*** ')
+                coin_stats.add_field(name=f':family_man_woman_boy: Public Tx :family_man_woman_boy:',
+                                     value=f':incoming_envelope: `{v["publicTxSendCount"]}`\n'
+                                           f':money_with_wings: `{(int(v["publicSent"] * (10 ** 7))) / (10 ** 7):.7f}`\n'
+                                           f':envelope_with_arrow: `{v["publicTxReceivedCount"]}`\n'
+                                           f':money_mouth: `{(int(v["publicReceived"] * (10 ** 7))) / (10 ** 7):.7f}`')
+                coin_stats.add_field(name=f':detective: Private Tx :detective:',
+                                     value=f':incoming_envelope: `{v["privateTxSendCount"]}`\n'
+                                           f':money_with_wings: `{(int(v["privateSent"] * (10 ** 7))) / (10 ** 7):.7f}`\n'
+                                           f':envelope_with_arrow: `{v["privateTxReceivedCount"]}`\n'
+                                           f':money_mouth: `{(int(v["privateReceived"] * (10 ** 7))) / (10 ** 7):.7f}` ')
+                coin_stats.add_field(name=f':convenience_store: Merchant purchases :convenience_store: ',
+                                     value=f':man_juggling: {v["roleTxCount"]}\n'
+                                           f':money_with_wings: {(int(v["spentOnRoles"] * (10 ** 7))) / (10 ** 7): .7f}\n',
+
+                                     inline=False)
+                await ctx.author.send(embed=coin_stats)
 
     async def explorer_messages(self, applied_channels: list, message: str, tx_type: str, on_chain: bool = None):
         """

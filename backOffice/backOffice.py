@@ -13,18 +13,26 @@ from backOffice.guildServicesManager import GuildProfileManager
 from backOffice.profileRegistrations import AccountManager
 from backOffice.botManager import BotManager
 from backOffice.corpHistory import CorporateHistoryManager
+from backOffice.secondLevelWalletManager import SecondLevelWalletManager
+from backOffice.thirdLevelWalletManager import ThirdLevelWalletManager
 
 
 class BackOffice:
     def __init__(self):
-        helper = Helpers()
-        bot_data = helper.read_json_file(file_name='botSetup.json')
+        self.helper = Helpers()
+        self.integrated_coins = self.helper.read_json_file(file_name='integratedCoins.json')
+        bot_data = self.helper.read_json_file(file_name='botSetup.json')
         self.connection = MongoClient(bot_data['database']['connection'], maxPoolSize=20)
         self.as_connection = motor.motor_asyncio.AsyncIOMotorClient(bot_data['database']['connection'])
         self.twitter_details = bot_data["twitter"]
+        self.horizon_url = bot_data['horizonServer']
+        self.creator_id = bot_data["creator"]
+        self.auto_messaging_channels = self.helper.read_json_file(file_name='autoMessagingChannels.json')
 
         self.backend_check = BotStructureCheck(self.connection)
-        self.stellar_wallet = StellarWallet()
+        self.second_level_manager = SecondLevelWalletManager(self.connection)
+        self.third_level_manager = ThirdLevelWalletManager(self.connection)
+        self.stellar_wallet = StellarWallet(horizon_url=self.horizon_url, integrated_coins=self.integrated_coins)
         self.merchant_manager = MerchantManager(self.connection)
         self.stellar_manager = StellarManager(self.connection, self.as_connection)
         self.stats_manager = StatsManager(self.connection, self.as_connection)
@@ -38,4 +46,3 @@ class BackOffice:
         self.backend_check.check_collections()
         self.backend_check.checking_stats_documents()
         self.backend_check.checking_bot_wallets()
-
